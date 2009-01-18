@@ -12,7 +12,7 @@ typedef struct{
   int    __align__(8) depth;  
   int    __align__(8) pitch;
   float  __align__(8) *ptr;
-  int    __align__(8) *where;
+  int    __align__(8) where;
 }band_info;
 
 	 void gpu_s_norm_filter(
@@ -81,10 +81,21 @@ void gpu_c_local(
     IN  int width,              /*width of the image*/
     IN  int height,             /*height of the image*/
     OUT band_info** ppc,        /*pointer to host storage*/
-    OUT int* pbands             /*number of bands*/
+    OUT int* pbands,             /*number of bands*/
+    IN  float scale=1.113,       /*resize scale*/
+    IN  int   num_scales=16      /*number of scales*/
     );
     
-    void cpu_release_images(
+    void gpu_create_c0(
+    IN  float* pimg,            /*pointer to image data*/
+    IN  int width,              /*width of the image*/
+    IN  int height,             /*height of the image*/
+    OUT band_info** ppc,        /*pointer to host storage*/
+    OUT int* pbands,             /*number of bands*/
+    IN  float scale=1.113,       /*resize scale*/
+    IN  int   num_scales=16      /*number of scales*/
+    );
+     void cpu_release_images(
         IN  band_info** ppbands, /*pointer to HOST storage*/
         OUT int num_bands        /*number of bands*/
     );

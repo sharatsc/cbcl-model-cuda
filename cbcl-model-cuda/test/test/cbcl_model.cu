@@ -7,16 +7,12 @@
 #include <assert.h>
 #include "cbcl_model.h"
 
-#define BLOCK_SIZE 16 
-#define MAXTHREADS 128 
+const int BLOCK_SIZE=16; 
+const int MAXTHREADS =128; 
 
 using namespace std;
 
 
-__global__  void kernel_s_norm_filter(float* dest,int depth,int wt,int ht,int fwt,int fht);
-/*
- *__global__  void kernel_s_norm_filter(band_info* filters,band_info* s,int band,int blockrows);
- */
 __global__  void kernel_c_generic(band_info* d_outbands,int b,float scalex,float scaley,int pool_xy,int blockrows);
 __global__  void kernel_s_exp_tuning(band_info* filters,band_info* s,int band,int blockrows);
 
@@ -26,7 +22,7 @@ image texture
 texture<float,2,cudaReadModeElementType> teximg;
 texture<float,2,cudaReadModeElementType> texfilt;
 
-__device__ float* elptr(float* base,int depth,int row,int col,int height,int pitch)
+__host__ __device__ float* elptr(float* base,int depth,int row,int col,int height,int pitch)
 {
 	return (float*)((char*)base+depth*height*pitch+row*pitch)+col;
 }
@@ -379,150 +375,34 @@ void cpu_create_c0(float* pimg,int width,int height,band_info** ppc,int* pbands,
 }
 
 
-
-
-
-#if 0
-/*
-put the image into texture memory
-put the filter into global memory
-call the kernel for each band of the input (maybe change later)
-*/
-void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt, band_info** pps, int *out_bands)
+__global__  void kernel_s_norm_filter(float* dest,int pitch,int depth,int wt,int ht,int fwt,int fht)
 {
-   cudaArray*				gpu_img_array;
-   band_info*				d_outbands;
-   band_info*				h_outbands;
-   band_info*				d_filts;
-   float*					d_ptr;
-   size_t					d_pitch;
-   /*channel description*/
-   
-   /*stage output*/
-   h_outbands = new band_info[in_bands];
-   for(int b=0;b<in_bands;b++)
-   {
-		h_outbands[b].height = cin[b].height;
-		h_outbands[b].width  = cin[b].width;
-		h_outbands[b].depth  = num_filt;
-		CUDA_SAFE_CALL(cudaMallocPitch((void**)&d_ptr,&d_pitch,cin[b].width*sizeof(float),num_filt*cin[b].height));
-		CUDA_SAFE_CALL(cudaMemset2D(d_ptr,d_pitch,0,cin[b].width*sizeof(float),num_filt*cin[b].height));
-		h_outbands[b].pitch = d_pitch;
-		h_outbands[b].ptr   = d_ptr;
-   }
-   CUDA_SAFE_CALL(cudaMalloc((void**)&d_outbands,in_bands*sizeof(band_info)));
-   CUDA_SAFE_CALL(cudaMemcpy(d_outbands,h_outbands,in_bands*sizeof(band_info),cudaMemcpyHostToDevice));
-   *out_bands= in_bands;
-	   
-   /* transfer filters*/
-   cpu_to_gpu(filt,num_filt,&d_filts);
-  
-   /*copy image*/ 
-   cudaChannelFormatDesc	imgdesc=cudaCreateChannelDesc<float>();
-   CUDA_SAFE_CALL(cudaMallocArray(&gpu_img_array,&imgdesc,cin[0].width,cin[0].height*cin[0].depth));
-   for(int b=0;b<in_bands;b++)
-   {
-		/*bind the texture*/
-		teximg.addressMode[0] = cudaAddressModeClamp;
-	    teximg.addressMode[1] = cudaAddressModeClamp;
-	    teximg.filterMode     = cudaFilterModePoint;
-	    teximg.normalized     = false;
-		/*copy to array*/
-		CUDA_SAFE_CALL(cudaMemcpy2DToArray(gpu_img_array,0,0,
-										   cin[b].ptr,cin[b].pitch,
-										   cin[b].width*sizeof(float),cin[b].height*cin[b].depth,
-									       cudaMemcpyHostToDevice));
-	    CUDA_SAFE_CALL(cudaBindTextureToArray(teximg,gpu_img_array));
-		/*call the kernel*/
-		int   nthreads	 = min(cin[b].height,MAXTHREADS);
-		int   blockrows  = ceilf((float)cin[b].height/nthreads);
-		uint3 gridsz	 = make_uint3(num_filt,1,1);
-		uint3 blocksz	 = make_uint3(nthreads,1,1);
-		kernel_s_norm_filter<<<gridsz,blocksz>>>(d_filts,d_outbands,b,blockrows);
-	    CUDA_SAFE_CALL(cudaUnbindTexture(teximg));						   
-   }
-   CUDA_SAFE_CALL(cudaThreadSynchronize());
-   /*copy image to output*/   
-   gpu_to_cpu(d_outbands,*out_bands,pps);
-   /*clean up*/
-   delete [] h_outbands;
-   CUDA_SAFE_CALL(cudaFreeArray(gpu_img_array));
-   gpu_release_images(&d_outbands,in_bands);
-   gpu_release_images(&d_filts,num_filt);
+    int         row             = blockIdx.y*BLOCK_SIZE+threadIdx.y;
+    int         col             = blockIdx.x*BLOCK_SIZE+threadIdx.x;
+    int         xoff            = floorf(fwt/2);
+    int         yoff            = floorf(fht/2);
+	int u,v,d;
+    float       den             = 0;
+    float       num             = 0;
+    float       pixval          = 0;
+    float       filtval         = 0;
+    if(row>ht-fht) return;
+    if(col>wt-fwt) return;
+    for(d=0;d<depth;d++)
+    {
+        for(v=0;v<fht;v++)
+            for(u=0;u<fwt;u++)
+            {
+                pixval =tex2D(teximg,col+u,d*ht+row+v);
+                filtval=tex2D(texfilt,u,d*fht+v);
+                num    +=pixval*filtval;
+                den    +=pixval*pixval;
+            }
+    }
+    /*printf(".");*/
+    *elptr(dest,0,row+yoff,col+xoff,ht,pitch)=fabs(num)/sqrtf(den+1e-6);
 }
 
-
-__global__  void kernel_s_norm_filter(band_info* filters,band_info* s,int band,int blockrows)
-{
-	__shared__ float sfilt[1024];
-	/*load the filter into shared memory*/
-	band_info 	filt_curr		=filters[blockIdx.x];
-	int			filt_pitch		=filt_curr.pitch;
-	int			filt_width		=filt_curr.width;
-	int			filt_height		=filt_curr.height;
-	int			filt_depth		=filt_curr.depth;
-	int			s_height		=s[band].height;
-	int			s_width			=s[band].width;
-	int			s_pitch			=s[band].pitch;
-
-	float		*inptr,*outptr;
-	int			depth			= 0;
-	int			col				= 0;
-	int			row_start		=threadIdx.x*blockrows;
-	int			row_end			=row_start+blockrows;
-    int			row				=row_start;
-	int u,v;
-
-	for(row = row_start;row<filt_height && row<row_end;row++)
-	{
-		for(depth=0;depth<filt_depth;depth++)
-		{
-			for(col=0;col<filt_width;col++)
-			{
-				inptr  		= elptr(filt_curr.ptr,depth,row,col,filt_height,filt_pitch);
-				outptr		= elptr(sfilt,depth,row,col,filt_height,filt_width*sizeof(float));
-				*outptr		= *inptr;
-			}	
-		}
-	}
-	__syncthreads();
-	int  bound = filt_width/2;
-	for(row = row_start;row< s_height&& row<row_end;row++)
-	{
-		/*compute response for a single row of output*/
-		if(row<bound || row>= s_height-bound)
-			continue;
-		outptr			=	elptr(s[band].ptr,blockIdx.x,row,0,s_height,s_pitch);
-		for(col=0;col<bound;col++)
-			outptr[col]=0;
-		for(col=bound;col<s_width-bound;col++)
-		{
-			float num      = 0.0f;
-			float denimg   = 0.01f;
-			for(depth=0;depth<1;depth++)
-			{
-				for(u=0;u<filt_width;u++)
-				{
-					for(v=0;v<filt_height;v++)
-					{
-						float  pixval  = tex2D(teximg,col+u-bound,s_height*depth+row+v-bound);
-						float* pfiltval= elptr(sfilt,depth,v,u,filt_height,filt_width*sizeof(float));
-						num+=  (*pfiltval)*pixval;
-						denimg+= pixval*pixval;
-					}/*end y*/
-				}/*end x*/
-			}/*end depth*/
-			float outval= fabsf(num)/(0.01f+sqrtf(denimg));
-			outptr[col] = outval;//fminf(1,outval);
-		}/*end col*/
-		for(col=s_width-bound;col<s_width;col++)
-			outptr[col]=0;
-	}/*end row*/
-	__syncthreads();
-}
-#endif
-
-#if 1
 /*
 put the image into texture memory
 put the filter into global memory
@@ -546,7 +426,7 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
 		h_outbands[b].depth  = num_filt;
 		CUDA_SAFE_CALL(cudaMalloc((void**)&d_ptr,cin[b].width*sizeof(float)*num_filt*cin[b].height));
 		CUDA_SAFE_CALL(cudaMemset(d_ptr,0,cin[b].width*sizeof(float)*num_filt*cin[b].height));
-		h_outbands[b].pitch = d_pitch;
+		h_outbands[b].pitch = cin[b].width*sizeof(float);
 		h_outbands[b].ptr   = d_ptr;
    }
    *pps      = h_outbands;
@@ -580,13 +460,15 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
         for(int f=0;f<num_filt;f++)
         {
             CUDA_SAFE_CALL(cudaMemcpy2DToArray(filtarray,0,0,
-                                               filt[f].ptr,filt[f].pitch,
+                                               filt[f].ptr,filt[f].width*sizeof(float),
                                                filt[f].width*sizeof(float),filt[f].height*filt[f].depth,
                                                cudaMemcpyHostToDevice));
-		    uint3 gridsz	 = make_uint3(ceilf(cin[b].width/BLOCK_SIZE),ceil(cin[b].height/BLOCK_SIZE),1);
+	        CUDA_SAFE_CALL(cudaBindTextureToArray(texfilt,filtarray));
+		    uint3 gridsz	 = make_uint3(ceilf((float)cin[b].width/BLOCK_SIZE),ceilf((float)cin[b].height/BLOCK_SIZE),1);
 		    uint3 blocksz	 = make_uint3(BLOCK_SIZE,BLOCK_SIZE,1);
-            float* dest      = h_outbands[b].ptr+cin[b].height*cin[b].width*f;
-		    kernel_s_norm_filter<<<gridsz,blocksz>>>(dest,cin[b].depth,cin[b].width,cin[b].height,filt[f].width,filt[f].height);
+            float* dest      = elptr(h_outbands[b].ptr,f,0,0,h_outbands[b].height,h_outbands[b].pitch);
+		    kernel_s_norm_filter<<<gridsz,blocksz>>>(dest,h_outbands[b].pitch,cin[b].depth,cin[b].width,cin[b].height,filt[f].width,filt[f].height);
+            CUDA_SAFE_CALL(cudaThreadSynchronize());
 	        CUDA_SAFE_CALL(cudaUnbindTexture(texfilt));
         }
         CUDA_SAFE_CALL(cudaUnbindTexture(teximg));
@@ -595,9 +477,11 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
    {
        int    sz  = h_outbands[b].height*h_outbands[b].width*num_filt;
        float* ptr = new float[sz];
-       CUDA_SAFE_CALL(cudaMemcpy(ptr,h_outbands[b].ptr,sz,cudaMemcpyDeviceToHost));
+       assert(ptr!=NULL);
+       CUDA_SAFE_CALL(cudaMemcpy(ptr,h_outbands[b].ptr,sz*sizeof(float),cudaMemcpyDeviceToHost));
        CUDA_SAFE_CALL(cudaFree(h_outbands[b].ptr));
-       h_outbands[b].ptr=ptr;
+       h_outbands[b].ptr   =ptr;
+       h_outbands[b].pitch =h_outbands[b].width*sizeof(float);
    }
    CUDA_SAFE_CALL(cudaThreadSynchronize());
    /*copy image to output*/   
@@ -605,34 +489,6 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
    CUDA_SAFE_CALL(cudaFreeArray(filtarray));
 }
 
-
-__global__  void kernel_s_norm_filter(float* dest,int depth,int wt,int ht,int fwt,int fht)
-{
-    int         row             = blockIdx.y*BLOCK_SIZE+threadIdx.y;
-    int         col             = blockIdx.x*BLOCK_SIZE+threadIdx.x;
-    int         xoff            = floorf(fwt/2);
-    int         yoff            = floorf(fht/2);
-	int u,v,d;
-    float       den             = 1e-6;
-    float       num             = 0;
-    float       pixval          = 0;
-    float       filtval         = 0;
-    if(row>=ht-fht) return;
-    if(col>=wt-fwt) return;
-    for(d=0;d<depth;d++)
-    {
-        for(v=0;v<fht;v++)
-            for(u=0;u<fwt;u++)
-            {
-                pixval =tex2D(teximg,col+u,d*ht+row+v);
-                filtval=tex2D(texfilt,u,d*fht+v);
-                num    +=pixval;
-                den    +=filtval*filtval;
-            }
-    }
-    dest[(row+yoff)*wt+col+xoff]=fabs(num)/sqrtf(den);
-}
-#endif
 
 void gpu_s_rbf(band_info* cin,int in_bands,band_info* filt,int num_filt,OUT band_info** pps,int*out_bands)
 {

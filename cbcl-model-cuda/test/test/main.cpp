@@ -126,7 +126,7 @@ void cpu_write_filters(band_info* pfilt,int nfilts,const char* filename)
             for(int y=0;y<pfilt->height;y++)
             {
                 for(int x=0;x<pfilt->width;x++)
-                    fout<<ptr[y*pfilt->width+x]<<" ";
+                    fout<< *elptr(pfilt->ptr,d,y,x,pfilt->height,pfilt->pitch)<<" ";
                 fout<<endl;
             }
         }
@@ -180,8 +180,8 @@ int main(int argc,char* argv[])
 	unsigned int hTimer;
     cpu_read_image("cameraman.pgm",&pimg,&width,&height);
     cpu_read_filters("c0Patches.txt",&c0patches,&nc0patches);
-    printf("Patches:%d\n",nc0patches);
 	cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,8);
+    printf("Patches:%d\n",nc0patches);
     CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
     CUT_SAFE_CALL( cutResetTimer(hTimer) );
     CUT_SAFE_CALL( cutStartTimer(hTimer) );

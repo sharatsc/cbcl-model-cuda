@@ -39,7 +39,9 @@ void gpu_c_local(
 		IN  band_info* s,     /*pointer to DEVICE storage*/
 		IN  int in_bands,     /*number of input bands*/
 		IN  int pool_xy,      /*spatial pooling: subsampling by pool_xy/2*/
-		IN  int pool_scale,   /*scale wise pooling: out_bands=in_bands/pool_scale*/
+		IN  int step_xy,      /*spatial subsampling factor*/
+        IN  int pool_scale,   /*scale wise pooling: out_bands=in_bands/pool_scale*/
+        IN  int step_scale,   /*scale incremenet step*/
 		OUT band_info** c,   /*pointer to DEVICE storage*/
 		OUT int* out_bands   /*number of output bands*/
 	);

@@ -12,8 +12,8 @@
 
 #define TEST_CREATE_C0 0 
 #define TEST_IO_FILTER 0
-#define TEST_S1        1
-
+#define TEST_S1        0 
+#define TEST_C1        1 
 
 using namespace std;
 typedef unsigned char uchar_t;
@@ -193,6 +193,45 @@ int main(int argc,char* argv[])
     cpu_release_images(&c0,nc0bands);
     cpu_release_images(&s1,ns1bands);
     delete[] c0;
+}
+#elif TEST_C1
+int main(int argc,char* argv[])
+{
+    band_info *c0;
+    band_info *s1;
+    band_info* c1;
+    band_info *c0patches;
+    int     nc0patches;
+    int     nc0bands;
+    int     ns1bands;
+    int     nc1bands;
+
+    float*  pimg;
+    int     height;
+    int     width;
+	unsigned int hTimer;
+    cpu_read_image("cameraman.pgm",&pimg,&width,&height);
+    cpu_read_filters("c0Patches.txt",&c0patches,&nc0patches);
+	cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,8);
+    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands);
+
+    CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
+    CUT_SAFE_CALL( cutResetTimer(hTimer) );
+    CUT_SAFE_CALL( cutStartTimer(hTimer) );
+    gpu_c_local(s1,ns1bands,8,3,2,2,&c1,&nc1bands);
+    double gpuTime = cutGetTimerValue(hTimer);
+    printf("Time taken for C1: %lf\n",gpuTime);
+
+    cpu_write_filters(c0,nc0bands,"c0.txt");
+    cpu_write_filters(s1,ns1bands,"s1.txt");
+    cpu_write_filters(c1,nc1bands,"c1.txt");
+
+    cpu_release_images(&c0,nc0bands);
+    cpu_release_images(&s1,ns1bands);
+    cpu_release_images(&c1,nc1bands);
+    delete[] c0;
+    delete[] s1;
+    delete[] c1;
 }
 #else
 int main(int argc,char* argv[])

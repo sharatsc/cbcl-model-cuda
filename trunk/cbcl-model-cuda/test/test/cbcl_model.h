@@ -31,6 +31,7 @@ typedef struct{
 		IN  int			in_bands,  /*number of input bands [IN]*/
 		IN  band_info	*pfilt,  /*pointer to DEVICE storage*/
 		IN  int			num_filt,  /*number of filtes=output depth*/
+        IN  float       sigma,      /*sigma for the tuning curve*/
 		OUT band_info	**pps,      /*pointer ot DEVICE storage*/
 		OUT int			*pout_bands/*number of output bands*/
 	   );
@@ -60,25 +61,6 @@ void gpu_c_local(
 	OUT int* out_units   /*=input depth*/	
 	);
 
-    void cpu_to_gpu(
-        IN band_info* pcin, /*pointer to HOST storage*/
-        IN int num_bands,   /*number of input bands*/
-        OUT band_info** ppcout,/*pointer to DEVICE storage*/
-        int copy=1             /*wheter image data should be copied as well*/
-    );
-
-    void gpu_release_images(
-        IN  band_info** ppbands, /*pointer to DEVICE storage*/
-        OUT int num_bands        /*number of bands*/
-    );
-   
-   void gpu_to_cpu(
-        IN band_info* pcin, /*pointer to DEVICE storage*/
-        IN int num_bands,   /*number of input bands*/
-        OUT band_info** ppcout,/*pointer to  HOST storage*/
-        int copy=1             /*wheter image data should be copied as well*/
-    );
- 
     void cpu_create_c0(
     IN  float* pimg,            /*pointer to image data*/
     IN  int width,              /*width of the image*/

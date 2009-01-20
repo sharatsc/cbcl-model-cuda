@@ -12,8 +12,9 @@
 
 #define TEST_CREATE_C0 0 
 #define TEST_IO_FILTER 0
-#define TEST_S1        0 
-#define TEST_C1        1 
+#define TEST_S1        1 
+#define TEST_C1        0
+#define TEST_C2        0 
 
 using namespace std;
 typedef unsigned char uchar_t;
@@ -23,12 +24,6 @@ void cpu_write_image(const char* name,float* pimg,int wt,int ht);
 void cpu_read_image(const char* name,float** ppimg,int * pwt,int* pht);
 void cpu_read_filters(const char* filename,band_info** ppfilt,int* pnfilts);
 void cpu_write_filters(band_info* pfilt,int nfilt,const char* filename);
-
-/*call different layers with default options*/
-void callback_c1_baseline(band_info*,int, band_info*,int,band_info** ,int* );
-void callback_c2_baseline(band_info*,int,band_info* ,int,band_info*,int,band_info**,int*);
-void callback_c2b_baseline(band_info*,int,band_info* ,int,band_info*,int,float**,int*);
-
 
 void cpu_write_image(const char* name,float* pimg,int wt,int ht)
 {
@@ -232,6 +227,58 @@ int main(int argc,char* argv[])
     delete[] c0;
     delete[] s1;
     delete[] c1;
+}
+#elif TEST_C2
+int main(int argc,char* argv[])
+{
+    band_info *c0;
+    band_info *s1;
+    band_info* c1;
+    band_info* s2;
+    float*     c2b;
+
+    band_info *c0patches;
+    band_info *c1patches;
+    int     nc0patches;
+    int     nc1patches;
+    int     nc0bands;
+    int     ns1bands;
+    int     nc1bands;
+    int     ns2bands;
+    int     nc2units;
+
+    float*  pimg;
+    int     height;
+    int     width;
+	unsigned int hTimer;
+    cpu_read_image("cameraman.pgm",&pimg,&width,&height);
+    cpu_read_filters("c0Patches.txt",&c0patches,&nc0patches);
+    cpu_read_filters("c1Patches.txt",&c1patches,&nc1patches);
+	cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,8);
+    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands);
+    gpu_c_local(s1,ns1bands,8,3,2,2,&c1,&nc1bands);
+
+    
+    CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
+    CUT_SAFE_CALL( cutResetTimer(hTimer) );
+    CUT_SAFE_CALL( cutStartTimer(hTimer) );
+    gpu_s_rbf(c1,nc1bands,c1patches,nc1patches,sqrtf(0.5),&s2,&ns2bands);
+    cpu_c_global(s2,ns2bands,&c2b,&nc2units);
+    double gpuTime = cutGetTimerValue(hTimer);
+    printf("Time taken for S2,C2: %lf\n",gpuTime);
+    cpu_write_filters(c0,nc0bands,"c0.txt");
+    cpu_write_filters(s1,ns1bands,"s1.txt");
+    cpu_write_filters(c1,nc1bands,"c1.txt");
+    cpu_write_filters(s2,ns2bands,"s2.txt");
+    cutWriteFilef("c2.txt",c2b,nc2units,1e-6);
+    cpu_release_images(&c0,nc0bands);
+    cpu_release_images(&s1,ns1bands);
+    cpu_release_images(&c1,nc1bands);
+    cpu_release_images(&s2,ns2bands);
+    delete[] c0;
+    delete[] s1;
+    delete[] c1;
+    delete[] s2;
 }
 #else
 int main(int argc,char* argv[])

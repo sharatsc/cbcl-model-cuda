@@ -6,6 +6,7 @@
 #define ONHOST   0
 #define ONDEVICE 1
 
+
 __host__ __device__ float* elptr(float* base,int depth,int row,int col,int height,int pitch);
 typedef struct{
   int    __align__(8) height;
@@ -84,5 +85,4 @@ void gpu_c_local(
         IN  band_info** ppbands, /*pointer to HOST storage*/
         OUT int num_bands        /*number of bands*/
     );
- 
 #endif

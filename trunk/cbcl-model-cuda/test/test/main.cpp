@@ -9,12 +9,12 @@
 #include <exception>
 #include <algorithm>
 #include <assert.h>
+#include <time.h>
 
-#define TEST_CREATE_C0 0 
-#define TEST_IO_FILTER 0
-#define TEST_S1        1 
+#define TEST_CREATE_C0 0
+#define TEST_S1        0 
 #define TEST_C1        0
-#define TEST_C2        0 
+#define TEST_C2        1
 
 using namespace std;
 typedef unsigned char uchar_t;
@@ -60,7 +60,7 @@ void cpu_read_image(const char* name,float** ppimg,int * pwt,int* pht)
 	for(int i=0;i<height*width;i++)
 		(*ppimg)[i]=(float)pbuff[i]/255.0;
 
-    free(pbuff);/*mixing deallocation methods:(*/	
+    cutFree(pbuff);/*mixing deallocation methods:(*/	
 	return;
 }
 
@@ -129,17 +129,7 @@ void cpu_write_filters(band_info* pfilt,int nfilts,const char* filename)
     fout.close();
 }
 
-#if TEST_IO_FILTERS //test read_filters
-int main(int argc,char* argv[])
-{
-    band_info* c0;
-    int        nc0bands;
-    cpu_read_filters("c0.txt",&c0,&nc0bands);
-    cpu_write_filters(c0,nc0bands,"copyc0.txt");
-    cpu_release_images(&c0,nc0bands);
-    delete[] c0;
-}
-#elif TEST_CREATE_C0
+#if TEST_CREATE_C0
 int main(int argc,char* argv[])
 {
     band_info *c0;
@@ -148,6 +138,7 @@ int main(int argc,char* argv[])
     int     height;
     int     width;
 	unsigned int hTimer;
+	CUT_DEVICE_INIT(argc,argv);
     cpu_read_image("cameraman.pgm",&pimg,&width,&height);
     CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
     CUT_SAFE_CALL( cutResetTimer(hTimer) );
@@ -155,7 +146,7 @@ int main(int argc,char* argv[])
 	cpu_create_c0(pimg,width,height,&c0,&nc0bands);
     double gpuTime = cutGetTimerValue(hTimer);
     printf("Time taken for C2: %lf\n",gpuTime);
-    cpu_write_filters(c0,nc0bands,"camerman.txt");
+    cpu_write_filters(c0,nc0bands,"c0.txt");
     cpu_release_images(&c0,nc0bands);
     delete[] c0;
 }
@@ -254,21 +245,16 @@ int main(int argc,char* argv[])
     cpu_read_image("cameraman.pgm",&pimg,&width,&height);
     cpu_read_filters("c0Patches.txt",&c0patches,&nc0patches);
     cpu_read_filters("c1Patches.txt",&c1patches,&nc1patches);
-	cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,8);
-    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands);
-    gpu_c_local(s1,ns1bands,8,3,2,2,&c1,&nc1bands);
-
-    
-    CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
+	CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
     CUT_SAFE_CALL( cutResetTimer(hTimer) );
     CUT_SAFE_CALL( cutStartTimer(hTimer) );
+    cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,16);
+    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands);
+    gpu_c_local(s1,ns1bands,8,3,2,1,&c1,&nc1bands);
     gpu_s_rbf(c1,nc1bands,c1patches,nc1patches,sqrtf(0.5),&s2,&ns2bands);
     cpu_c_global(s2,ns2bands,&c2b,&nc2units);
     double gpuTime = cutGetTimerValue(hTimer);
     printf("Time taken for S2,C2: %lf\n",gpuTime);
-    cpu_write_filters(c0,nc0bands,"c0.txt");
-    cpu_write_filters(s1,ns1bands,"s1.txt");
-    cpu_write_filters(c1,nc1bands,"c1.txt");
     cpu_write_filters(s2,ns2bands,"s2.txt");
     cutWriteFilef("c2.txt",c2b,nc2units,1e-6);
     cpu_release_images(&c0,nc0bands);
@@ -283,58 +269,6 @@ int main(int argc,char* argv[])
 #else
 int main(int argc,char* argv[])
 {
-	/*define storage for the layers*/
-    band_info* c0;
-	int		   c0bands;
-
-    /*define storage for the prototypes/patches*/
-	band_info* patches_c0;
-	band_info* patches_c1;
-	int		   num_c0;
-	int		   num_c1;
-
-	float * pc2b;
-	int     nc2b;
-
-	//CUT_DEVICE_INIT();
-	if(argc<3)
-	{
-		fprintf(stderr,"usage is %s <in img> <out img>\n",argv[0]);
-		return -1;
-	}
-	try
-	{
-		float*	pimg;
-		float*  pout;
-		float*  phuge;
-		int		ht	=	0;
-		int		wt	=	0;
-		cpu_read_image(argv[1],&pimg,&wt,&ht);
-		cpu_create_c0(pimg,wt,ht,&c0,&c0bands);
-		cpu_read_filters("patches_gabor.txt",&patches_c0,&num_c0);
-		cpu_read_filters("patches_c1.txt",&patches_c1,&num_c1);
-
-		printf("computing C2\n");
-	    unsigned int hTimer;
-        CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
-        CUT_SAFE_CALL( cutResetTimer(hTimer) );
-        CUT_SAFE_CALL( cutStartTimer(hTimer) );
-		callback_c2b_baseline(c0,c0bands,patches_c0,num_c0,patches_c1,num_c1,&pc2b,&nc2b);
-        CUT_SAFE_CALL( cutStopTimer(hTimer) );
-        double gpuTime = cutGetTimerValue(hTimer);
-        printf("Time taken for C2: %lf\n",gpuTime);
-
-		cpu_release_images(&c0,c0bands);
-		cpu_release_images(&patches_c0,num_c0);
-		delete[] pimg;
-	}
-	catch(...)
-	{
-		cout<<"Exception"<<endl;
-	}
-	printf("done...");
-	fflush(stdin);
-	getchar();
-	return 0;
+	printf("Nothing to do!\n");
 }
 #endif

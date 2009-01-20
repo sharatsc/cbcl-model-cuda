@@ -1,15 +1,49 @@
 #include "cuda.h"
 #include "cutil.h"
 #include <stdio.h>
-#include <iostream>
-#include <fstream>
-#include <algorithm>
 #include <assert.h>
 #include "cbcl_model.h"
 
 
 #define BLOCK_SIZE 8 
 using namespace std;
+
+float* min_element(float* start,float* end)
+{
+
+	float* minptr=start;
+	float  minval=*start;
+	float  val   = minval;
+	for(float* ptr=start;ptr!=end;ptr++)
+	{
+		val=*ptr;
+		if(val<minval)
+		{
+			minval=val;
+			minptr=ptr;
+		}
+	}
+	return minptr;
+}
+
+
+float* max_element(float* start,float* end)
+{
+	float* maxptr=start;
+	float  maxval=*start;
+	float  val   = maxval;
+	for(float* ptr=start;ptr!=end;ptr++)
+	{
+		val=*ptr;
+		if(val>maxval)
+		{
+			maxval=val;
+			maxptr=ptr;
+		}
+	}
+	return maxptr;
+}
+
 
 /*
 image texture
@@ -81,7 +115,7 @@ void gpu_c_local(
 		CUDA_SAFE_CALL(cudaMemset(d_ptr,0,h_outbands[o].width*sizeof(float)*h_outbands[o].depth*h_outbands[o].height));
 		h_outbands[o].pitch = h_outbands[o].width*sizeof(float);
 		h_outbands[o].ptr   = d_ptr;
-        printf("Band %d->%dx%dx%d\n",o,h_outbands[o].depth,h_outbands[o].width,h_outbands[o].height);
+        //printf("Band %d->%dx%dx%d\n",o,h_outbands[o].depth,h_outbands[o].width,h_outbands[o].height);
    }
    *pout_bands   = out_bands;
    *c            = h_outbands;
@@ -469,7 +503,7 @@ void gpu_s_rbf(band_info* cin,int in_bands,band_info* filt,int num_filt, float s
 	    CUDA_SAFE_CALL(cudaBindTextureToArray(teximg,imgarray));
         for(int f=0;f<num_filt;f++)
         {
-            printf("Processing S2: (%d,%d)\n",b,f);
+            //printf("Processing S2: (%d,%d)\n",b,f);
             CUDA_SAFE_CALL(cudaMemcpy2DToArray(filtarray,0,0,
                                                filt[f].ptr,filt[f].width*sizeof(float),
                                                filt[f].width*sizeof(float),filt[f].height*filt[f].depth,

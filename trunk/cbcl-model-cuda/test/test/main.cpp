@@ -145,7 +145,7 @@ int main(int argc,char* argv[])
     CUT_SAFE_CALL( cutStartTimer(hTimer) );
 	cpu_create_c0(pimg,width,height,&c0,&nc0bands);
     double gpuTime = cutGetTimerValue(hTimer);
-    printf("Time taken for C2: %lf\n",gpuTime);
+    printf("Time taken for C0: %lf\n",gpuTime);
     cpu_write_filters(c0,nc0bands,"c0.txt");
     cpu_release_images(&c0,nc0bands);
     delete[] c0;
@@ -166,11 +166,11 @@ int main(int argc,char* argv[])
 	unsigned int hTimer;
     cpu_read_image("cameraman.pgm",&pimg,&width,&height);
     cpu_read_filters("c0Patches.txt",&c0patches,&nc0patches);
-	cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,8);
     printf("Patches:%d\n",nc0patches);
     CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
     CUT_SAFE_CALL( cutResetTimer(hTimer) );
     CUT_SAFE_CALL( cutStartTimer(hTimer) );
+	cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,8);
     gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands);
     double gpuTime = cutGetTimerValue(hTimer);
     printf("Time taken for S1: %lf\n",gpuTime);
@@ -249,8 +249,8 @@ int main(int argc,char* argv[])
     CUT_SAFE_CALL( cutResetTimer(hTimer) );
     CUT_SAFE_CALL( cutStartTimer(hTimer) );
     cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,16);
-    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands);
-    gpu_c_local(s1,ns1bands,8,3,2,1,&c1,&nc1bands);
+    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands,false);
+    gpu_c_local(s1,ns1bands,8,3,2,1,&c1,&nc1bands,false);
     gpu_s_rbf(c1,nc1bands,c1patches,nc1patches,sqrtf(0.5),&s2,&ns2bands);
     cpu_c_global(s2,ns2bands,&c2b,&nc2units);
     double gpuTime = cutGetTimerValue(hTimer);

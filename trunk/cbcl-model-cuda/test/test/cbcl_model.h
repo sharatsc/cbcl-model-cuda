@@ -23,7 +23,8 @@ typedef struct{
 		IN  band_info	*pfilt,  /*pointer to DEVICE storage*/
 		IN  int			num_filt,  /*number of filtes=output depth*/
 		OUT band_info	**pps,      /*pointer ot DEVICE storage*/
-		OUT int			*pout_bands/*number of output bands*/
+		OUT int			*pout_bands,/*number of output bands*/
+        IN  bool        copy=true   /*copy output to host*/
 	   );
 
 
@@ -34,7 +35,8 @@ typedef struct{
 		IN  int			num_filt,  /*number of filtes=output depth*/
         IN  float       sigma,      /*sigma for the tuning curve*/
 		OUT band_info	**pps,      /*pointer ot DEVICE storage*/
-		OUT int			*pout_bands/*number of output bands*/
+		OUT int			*pout_bands,/*number of output bands*/
+        IN  bool        copy=true  /*copy results back to host*/
 	   );
 
 void gpu_c_local(
@@ -45,7 +47,8 @@ void gpu_c_local(
         IN  int pool_scale,   /*scale wise pooling: out_bands=in_bands/pool_scale*/
         IN  int step_scale,   /*scale incremenet step*/
 		OUT band_info** c,   /*pointer to DEVICE storage*/
-		OUT int* out_bands   /*number of output bands*/
+		OUT int* out_bands,   /*number of output bands*/
+        IN  bool copy=true    /*copy results back to host*/
 	);
 
 	void gpu_c_global(
@@ -79,8 +82,10 @@ void gpu_c_local(
     OUT band_info** ppc,        /*pointer to host storage*/
     OUT int* pbands,             /*number of bands*/
     IN  float scale=1.113,       /*resize scale*/
-    IN  int   num_scales=16      /*number of scales*/
+    IN  int   num_scales=16,      /*number of scales*/
+    IN  bool  copy      =true    /*copy output to host*/
     );
+
      void cpu_release_images(
         IN  band_info** ppbands, /*pointer to HOST storage*/
         OUT int num_bands        /*number of bands*/

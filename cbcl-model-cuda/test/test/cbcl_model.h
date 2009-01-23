@@ -3,8 +3,9 @@
 #define IN 
 #define OUT
 
-#define ONHOST   0
-#define ONDEVICE 1
+#define ONHOST       0
+#define ONHOSTLOCKED 1
+#define ONDEVICE 2
 
 
 __host__ __device__ float* elptr(float* base,int depth,int row,int col,int height,int pitch);

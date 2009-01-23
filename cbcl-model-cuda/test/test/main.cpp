@@ -12,9 +12,9 @@
 #include <time.h>
 
 #define TEST_CREATE_C0 0
-#define TEST_S1        0 
+#define TEST_S1        1 
 #define TEST_C1        0
-#define TEST_C2        1
+#define TEST_C2        0
 
 using namespace std;
 typedef unsigned char uchar_t;
@@ -171,14 +171,13 @@ int main(int argc,char* argv[])
     CUT_SAFE_CALL( cutResetTimer(hTimer) );
     CUT_SAFE_CALL( cutStartTimer(hTimer) );
 	cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,8);
-    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands);
+    gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands,false);
     double gpuTime = cutGetTimerValue(hTimer);
     printf("Time taken for S1: %lf\n",gpuTime);
     cpu_write_filters(c0,nc0bands,"c0.txt");
-    cpu_write_filters(s1,ns1bands,"s1.txt");
+    //cpu_write_filters(s1,ns1bands,"s1.txt");
     cpu_release_images(&c0,nc0bands);
     cpu_release_images(&s1,ns1bands);
-    delete[] c0;
 }
 #elif TEST_C1
 int main(int argc,char* argv[])

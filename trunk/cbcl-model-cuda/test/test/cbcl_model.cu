@@ -5,7 +5,7 @@
 #include "cbcl_model.h"
 
 
-#define BLOCK_SIZE 8 
+#define BLOCK_SIZE 16 
 using namespace std;
 
 float* min_element(float* start,float* end)
@@ -337,8 +337,6 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int depth,int wt,int
     float       num             = 0;
     float       pixval          = 0;
     float       filtval         = 0;
-    if(row>ht-fht) return;
-    if(col>wt-fwt) return;
     for(d=0;d<depth;d++)
     {
         int istride = d*ht;
@@ -352,7 +350,7 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int depth,int wt,int
                 den    +=pixval*pixval;
             }
     }
-    *elptr(dest,0,row+yoff,col+xoff,ht,pitch)=fabs(num)/sqrtf(den+1e-6);
+    *elptr(dest,0,row,col,ht,pitch)=fabs(num)/sqrtf(den+1e-6);
 }
 
 /*
@@ -367,18 +365,19 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
    band_info*				h_outbands;
    float*					d_ptr;
    cudaMemcpyKind           copydir;
+   size_t                   pitch;
    /*channel description*/
    
    /*stage output*/
    h_outbands = new band_info[in_bands];
    for(int b=0;b<in_bands;b++)
    {
-		h_outbands[b].height = cin[b].height;
-		h_outbands[b].width  = cin[b].width;
+		h_outbands[b].height = cin[b].height-filt[0].height+1;
+		h_outbands[b].width  = cin[b].width-filt[0].width+1;
 		h_outbands[b].depth  = num_filt;
-		CUDA_SAFE_CALL(cudaMalloc((void**)&d_ptr,cin[b].width*sizeof(float)*num_filt*cin[b].height));
-		CUDA_SAFE_CALL(cudaMemset(d_ptr,0,cin[b].width*sizeof(float)*num_filt*cin[b].height));
-		h_outbands[b].pitch = cin[b].width*sizeof(float);
+		CUDA_SAFE_CALL(cudaMallocPitch((void**)&d_ptr,&pitch,cin[b].width*sizeof(float),num_filt*cin[b].height));
+		CUDA_SAFE_CALL(cudaMemset2D(d_ptr,0,pitch,cin[b].width*sizeof(float),cin[b].depth*cin[b].height));
+		h_outbands[b].pitch = pitch; 
         h_outbands[b].where = ONDEVICE;
 		h_outbands[b].ptr   = d_ptr;
    }
@@ -434,7 +433,10 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
        int    sz  = h_outbands[b].height*h_outbands[b].width*num_filt;
        float* ptr = new float[sz];
        assert(ptr!=NULL);
-       CUDA_SAFE_CALL(cudaMemcpy(ptr,h_outbands[b].ptr,sz*sizeof(float),cudaMemcpyDeviceToHost));
+       CUDA_SAFE_CALL(cudaMemcpy2D(ptr,h_outbands[b].width*sizeof(float),
+                                  h_outbands[b].ptr,h_outbands[b].pitch,
+                                  h_outbands[b].width*sizeof(float),h_outbands[b].height*h_outbands[b].depth,
+                                  cudaMemcpyDeviceToHost));
        CUDA_SAFE_CALL(cudaFree(h_outbands[b].ptr));
        h_outbands[b].ptr   =ptr;
        h_outbands[b].pitch =h_outbands[b].width*sizeof(float);

@@ -39,6 +39,9 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
+				Name="CUDA Build Rule"
+			/>
+			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -721,7 +724,7 @@
 					>
 					<Tool
 						Name="VCCustomBuildTool"
-						CommandLine="&quot;$(CUDA_BIN_PATH)\nvcc.exe&quot; --host-compilation c++  -ccbin &quot;$(VCInstallDir)bin&quot; -c -D_DEBUG -DWIN32 -D_CONSOLE -D_MBCS -Xcompiler /EHsc,/W3,/nologo,/Wp64,/O2,/Zi,/MTd -I&quot;$(CUDA_INC_PATH)&quot; -I./ -I$(CUDA)/common/inc -o $(ConfigurationName)\$(InputName).obj $(InputFileName)"
+						CommandLine="&quot;$(CUDA_BIN_PATH)\nvcc.exe&quot;  --maxrregcount 32 --host-compilation c++  -ccbin &quot;$(VCInstallDir)bin&quot; -c -D_DEBUG -DWIN32 -D_CONSOLE -D_MBCS -Xcompiler /EHsc,/W3,/nologo,/Wp64,/O2,/Zi,/MTd -I&quot;$(CUDA_INC_PATH)&quot; -I./ -I$(CUDA)/common/inc -o $(ConfigurationName)\$(InputName).obj $(InputFileName)&#x0D;&#x0A;"
 						Outputs="$(ConfigurationName)\$(InputName).obj"
 					/>
 				</FileConfiguration>

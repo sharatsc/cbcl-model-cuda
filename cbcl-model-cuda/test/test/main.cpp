@@ -246,21 +246,16 @@ int main(int argc,char* argv[])
     CUT_SAFE_CALL( cutStartTimer(hTimer) );
     cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,12);
     gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands,false);
-    gpu_c_local(s1,ns1bands,8,3,2,1,&c1,&nc1bands,false);
+    gpu_c_local(s1,ns1bands,8,3,2,2,&c1,&nc1bands,false);
     gpu_s_rbf(c1,nc1bands,c1patches,nc1patches,sqrtf(0.5),&s2,&ns2bands);
     cpu_c_global(s2,ns2bands,&c2b,&nc2units);
     double gpuTime = cutGetTimerValue(hTimer);
     printf("Time taken for S2,C2: %lf\n",gpuTime);
-    cpu_write_filters(s2,ns2bands,"s2.txt");
     cutWriteFilef("c2.txt",c2b,nc2units,1e-6);
     cpu_release_images(&c0,nc0bands);
     cpu_release_images(&s1,ns1bands);
     cpu_release_images(&c1,nc1bands);
     cpu_release_images(&s2,ns2bands);
-    delete[] c0;
-    delete[] s1;
-    delete[] c1;
-    delete[] s2;
 }
 #else
 int main(int argc,char* argv[])

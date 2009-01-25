@@ -56,33 +56,28 @@ __host__ __device__ float* elptr(float* base,int depth,int row,int col,int heigh
 	return (float*)((char*)base+depth*height*pitch+row*pitch)+col;
 }
 
-__global__ void kernel_c_local(float* dest,int depth,float wt,float ht,int poolxy,int stepxy,int srcwidth,int srcheight)
+__global__ void kernel_c_local(float* dest,int pitch,int depth,float wt,float ht,int poolxy,int stepxy,int srcwidth,int srcheight,float xscale,float yscale)
 {
     int col       = blockIdx.x*BLOCK_SIZE+threadIdx.x;
     int row       = blockIdx.y*BLOCK_SIZE+threadIdx.y; 
-    int hpool     = poolxy/2;
-    int x         = (col-1)*stepxy+hpool;
-    int y         = (row-1)*stepxy+hpool;
-    float xscale  = (float)srcwidth/(wt*stepxy+poolxy-1);
-    float yscale  = (float)srcheight/(ht*stepxy+poolxy-1);
+    int x         = col*stepxy;
+    int y         = row*stepxy;
     if(row>=ht) return;
     if(col>=wt) return;
-    //printf("Called with hpool:%d\n xscale:%f\n yscale:%f\n",hpool,xscale,yscale);
-    //printf("(%d,%d),(%d,%d)->%d,%d\n",blockIdx.x,blockIdx.y,threadIdx.x,threadIdx.y,row,col);
     for(int d=0;d<depth;d++)
     {
         float maxval  = 0;
         float pixval  = 0;
-        for(int v=-hpool;v<hpool;v++)
-            for(int u=-hpool;u<hpool;u++)
+        int   istride = d*srcheight;
+        for(int v=0;v<poolxy;v++)
+            for(int u=0;u<poolxy;u++)
             {
-                pixval=tex2D(teximg,(x+u)*xscale,d*srcheight+(y+v)*yscale);
-                if(pixval>maxval)
-                    maxval=pixval;
+                pixval=tex2D(teximg,(x+u)*xscale,istride+(y+v)*yscale);
+                maxval=maxval>pixval?maxval:pixval;
             }
-        float* ptr = elptr(dest,d,row,col,ht,wt*sizeof(float));
+        float* ptr = elptr(dest,d,row,col,ht,pitch);
         if(*ptr<maxval)
-        *ptr = maxval;
+            *ptr = maxval;
     }
 }
 
@@ -103,7 +98,7 @@ void gpu_c_local(
    float*                   d_ptr;
    cudaMemcpyKind           copydir=cudaMemcpyHostToDevice;
    int i,o,b;
-
+   size_t pitch;
    int out_bands = (in_bands-pool_scale)/step_scale+1;
    /*stage output*/
    h_outbands = new band_info[out_bands];
@@ -113,9 +108,9 @@ void gpu_c_local(
 		h_outbands[o].height = (sin[i].height-pool_xy)/step_xy+1;
 		h_outbands[o].width  = (sin[i].width-pool_xy)/step_xy+1;
 		h_outbands[o].depth  = sin[i].depth;
-		CUDA_SAFE_CALL(cudaMalloc((void**)&d_ptr,h_outbands[o].width*sizeof(float)*h_outbands[o].depth*h_outbands[o].height));
-		CUDA_SAFE_CALL(cudaMemset(d_ptr,0,h_outbands[o].width*sizeof(float)*h_outbands[o].depth*h_outbands[o].height));
-		h_outbands[o].pitch = h_outbands[o].width*sizeof(float);
+        CUDA_SAFE_CALL(cudaMallocPitch((void**)&d_ptr,&pitch,h_outbands[o].width*sizeof(float),h_outbands[o].depth*h_outbands[o].height));
+        CUDA_SAFE_CALL(cudaMemset(d_ptr,0,pitch*h_outbands[o].depth*h_outbands[o].height));
+		h_outbands[o].pitch = pitch;
 		h_outbands[o].ptr   = d_ptr;
         h_outbands[o].where = ONDEVICE;
    }
@@ -123,11 +118,10 @@ void gpu_c_local(
    *c            = h_outbands;
 
     cudaChannelFormatDesc	imgdesc=cudaCreateChannelDesc<float>();
-	CUDA_SAFE_CALL(cudaMallocArray(&imgarray,&imgdesc,sin[0].width,sin[0].height*sin[0].depth));
 	/*bind the texture*/
 	teximg.addressMode[0] = cudaAddressModeClamp;
 	teximg.addressMode[1] = cudaAddressModeClamp;
-	teximg.filterMode     = cudaFilterModeLinear; 
+	teximg.filterMode     = cudaFilterModePoint; 
 	teximg.normalized     = false;
 		
    /*copy image*/ 
@@ -138,17 +132,24 @@ void gpu_c_local(
             copydir = cudaMemcpyHostToDevice;
             if(sin[i+b].where==ONDEVICE)
                 copydir=cudaMemcpyDeviceToDevice;
+	        CUDA_SAFE_CALL(cudaMallocArray(&imgarray,&imgdesc,sin[i+b].width,sin[i+b].height*sin[i+b].depth));
+            assert(imgarray!=NULL);
 	        CUDA_SAFE_CALL(cudaMemcpy2DToArray(imgarray,0,0,
-										   sin[i+b].ptr,sin[i+b].width*sizeof(float),
+										   sin[i+b].ptr,sin[i+b].pitch,
 										   sin[i+b].width*sizeof(float),sin[i+b].height*sin[i+b].depth,
 									       copydir));
 	        CUDA_SAFE_CALL(cudaBindTextureToArray(teximg,imgarray));
 	    	/*call the kernel*/
 		    uint3 gridsz	 = make_uint3(ceilf((float)h_outbands[o].width/BLOCK_SIZE),ceilf((float)h_outbands[o].height/BLOCK_SIZE),1);
 		    uint3 blocksz	 = make_uint3(BLOCK_SIZE,BLOCK_SIZE,1);
-		    kernel_c_local<<<gridsz,blocksz>>>(h_outbands[o].ptr,h_outbands[o].depth,h_outbands[o].width,h_outbands[o].height,pool_xy,step_xy,sin[i+b].width,sin[i+b].height);
+		    kernel_c_local<<<gridsz,blocksz>>>(h_outbands[o].ptr,h_outbands[o].pitch,
+                                              h_outbands[o].depth,h_outbands[o].width,h_outbands[o].height,
+                                              pool_xy,step_xy,
+                                              sin[i+b].width,sin[i+b].height,
+                                              (float)sin[i+b].width/sin[i].width,(float)sin[i+b].height/sin[i].height);
 		    CUDA_SAFE_CALL(cudaThreadSynchronize());
 		    CUDA_SAFE_CALL(cudaUnbindTexture(teximg));
+            CUDA_SAFE_CALL(cudaFreeArray(imgarray));
       }
    }
    /*copy image back to host*/
@@ -157,14 +158,16 @@ void gpu_c_local(
        int    sz  = h_outbands[b].height*h_outbands[b].width*h_outbands[b].depth;
        float* ptr = new float[sz];
        assert(ptr!=NULL);
-       CUDA_SAFE_CALL(cudaMemcpy(ptr,h_outbands[b].ptr,sz*sizeof(float),cudaMemcpyDeviceToHost));
+       CUDA_SAFE_CALL(cudaMemcpy2D(ptr,h_outbands[b].width*sizeof(float),
+                                   h_outbands[b].ptr,h_outbands[b].pitch,
+                                   h_outbands[b].width*sizeof(float),h_outbands[b].height*h_outbands[b].depth,
+                                   cudaMemcpyDeviceToHost));
        CUDA_SAFE_CALL(cudaFree(h_outbands[b].ptr));
        h_outbands[b].ptr   =ptr;
        h_outbands[b].pitch =h_outbands[b].width*sizeof(float);
        h_outbands[b].where =ONHOST;
    }
    CUDA_SAFE_CALL(cudaThreadSynchronize());
-   CUDA_SAFE_CALL(cudaFreeArray(imgarray));
 }
 
 
@@ -182,35 +185,35 @@ void cpu_release_images(band_info** ppbands,int num_bands)
 	*ppbands = NULL;
 }
 
-__global__ void kernel_resize(float *dest,int wt,int ht,float xscale,float yscale)
+__global__ void kernel_resize(float *dest,int pitch,int wt,int ht,float xscale,float yscale)
 {
     int row=blockIdx.y*BLOCK_SIZE+threadIdx.y;
     int col=blockIdx.x*BLOCK_SIZE+threadIdx.x;
     if(row>=ht) return;
     if(col>=wt) return;
-    dest[row*wt+col]=tex2D(teximg,(float)col*xscale,(float)row*yscale);
+    float* ptr      = elptr(dest,0,row,col,ht,pitch);
+    *ptr            = tex2D(teximg,(float)col*xscale,(float)row*yscale);
 }
 
 void gpu_create_c0(float* pimg,int width,int height,band_info** ppc,int* pbands,float scale,int num_scales,bool copy)
 {
+    size_t  pitch          = 0;
 	*ppc				   = new band_info[num_scales];
 	*pbands				   = num_scales;
     assert(*ppc!=NULL);
     assert(*pbands>=1);
+    float* ptr               = NULL;
+    CUDA_SAFE_CALL(cudaMallocPitch((void**)&ptr,&pitch,width*sizeof(float),height));
+    assert(ptr);
+    CUDA_SAFE_CALL(cudaMemcpy2D(ptr,pitch,pimg,width*sizeof(float),width*sizeof(float),height,cudaMemcpyHostToDevice));
     /*create first band*/
     (*ppc)->height           = height;
     (*ppc)->width            = width;
     (*ppc)->depth            = 1;
-    (*ppc)->pitch            = width*sizeof(float);
-    float* ptr               = NULL;
-    CUDA_SAFE_CALL(cudaMalloc((void**)&ptr,height*width*sizeof(float)));
-    CUDA_SAFE_CALL(cudaMemcpy(ptr,pimg,height*width*sizeof(float),cudaMemcpyHostToDevice));
+    (*ppc)->pitch            = pitch;
     (*ppc)->ptr              = ptr;
-    assert((*ppc)->ptr);
-
     cudaArray*               pdimg;
-    cudaChannelFormatDesc	imgdesc=cudaCreateChannelDesc<float>();
-    CUDA_SAFE_CALL(cudaMallocArray(&pdimg,&imgdesc,width,height));
+    cudaChannelFormatDesc	 imgdesc=cudaCreateChannelDesc<float>();
 	/*bind the texture*/
 	teximg.addressMode[0] = cudaAddressModeClamp;
 	teximg.addressMode[1] = cudaAddressModeClamp;
@@ -223,40 +226,44 @@ void gpu_create_c0(float* pimg,int width,int height,band_info** ppc,int* pbands,
         band_info* pc            = *ppc+b;
 		int bht			         = roundf(prev->height/scale);
 		int bwt			         = roundf(prev->width/scale);
-		pc->height		         = bht;
-		pc->width		         = bwt;
-		pc->pitch		         = bwt*sizeof(float);
-		pc->depth		         = 1;
         /*map to texture*/
+        CUDA_SAFE_CALL(cudaMallocArray(&pdimg,&imgdesc,prev->width,prev->height));
         CUDA_SAFE_CALL(cudaMemcpy2DToArray(pdimg,0,0,
-										   prev->ptr,prev->width*sizeof(float),
+										   prev->ptr,prev->pitch,
 										   prev->width*sizeof(float),prev->height,
 									       cudaMemcpyDeviceToDevice));
 	    CUDA_SAFE_CALL(cudaBindTextureToArray(teximg,pdimg));
         /*allocate the memory*/
         float* pdout             = NULL;
-        CUDA_SAFE_CALL(cudaMalloc((void**)&pdout,bht*bwt*sizeof(float)));
-        CUDA_SAFE_CALL(cudaMemset(pdout,0,bht*bwt*sizeof(float)));
+        CUDA_SAFE_CALL(cudaMallocPitch((void**)&pdout,&pitch,bwt*sizeof(float),bht));
+        CUDA_SAFE_CALL(cudaMemset(pdout,0,bht*pitch));
+        pc->height		         = bht;
+		pc->width		         = bwt;
+		pc->pitch		         = pitch;
+		pc->depth		         = 1;
         pc->ptr                  = pdout;
         pc->where                = ONDEVICE;
 	    /*call the kernel*/
 		uint3 gridsz	 = make_uint3(ceilf((float)bwt/BLOCK_SIZE),ceilf((float)bht/BLOCK_SIZE),1);
 		uint3 blocksz	 = make_uint3(BLOCK_SIZE,BLOCK_SIZE,1);
-		kernel_resize<<<gridsz,blocksz>>>(pdout,bwt,bht,(float)prev->width/bwt,(float)prev->height/bht);
+		kernel_resize<<<gridsz,blocksz>>>(pdout,pitch,bwt,bht,(float)prev->width/bwt,(float)prev->height/bht);
         CUDA_SAFE_CALL(cudaThreadSynchronize());
+        CUDA_SAFE_CALL(cudaFreeArray(pdimg));
         CUDA_SAFE_CALL(cudaUnbindTexture(teximg));						   
    }
    for(int b=0;copy && b<num_scales;b++)
    {
        band_info* pc =*ppc+b;
        float*     ptr=new float[pc->height*pc->width];
-       CUDA_SAFE_CALL(cudaMemcpy(ptr,pc->ptr,pc->height*pc->width*sizeof(float),
+       CUDA_SAFE_CALL(cudaMemcpy2D(ptr,pc->width*sizeof(float),
+                      pc->ptr,pc->pitch,
+                      pc->width*sizeof(float),pc->height,
                       cudaMemcpyDeviceToHost));
        CUDA_SAFE_CALL(cudaFree(pc->ptr));
        pc->ptr       = ptr;
+       pc->pitch     = pc->width*sizeof(float);
        pc->where     = ONHOST;
    }
-   CUDA_SAFE_CALL(cudaFreeArray(pdimg));
 }
 
 void cpu_create_c0(float* pimg,int width,int height,band_info** ppc,int* pbands,float scale,int num_scales)
@@ -326,31 +333,37 @@ void cpu_create_c0(float* pimg,int width,int height,band_info** ppc,int* pbands,
 }
 
 
-__global__  void kernel_s_norm_filter(float* dest,int pitch,int depth,int wt,int ht,int fwt,int fht)
+__global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int srcwidth,int srcheight,int depth,int fsz,int num_filt)
 {
     int         row             = blockIdx.y*BLOCK_SIZE+threadIdx.y;
     int         col             = blockIdx.x*BLOCK_SIZE+threadIdx.x;
-    int         xoff            = floorf(fwt/2);
-    int         yoff            = floorf(fht/2);
+    int         fstride         = fsz*depth;
 	int u,v,d;
     float       den             = 0;
     float       num             = 0;
     float       pixval          = 0;
     float       filtval         = 0;
-    for(d=0;d<depth;d++)
+    if(row>=ht) return;
+    if(col>=wt) return;
+    for(int f=0;f<num_filt;f++)
     {
-        int istride = d*ht;
-        int fstride = d*fht;
-        for(v=0;v<fht;v++)
-            for(u=0;u<fwt;u++)
-            {
-                pixval =tex2D(teximg,col+u,istride+row+v);
-                filtval=tex2D(texfilt,u,fstride+v);
-                num    +=pixval*filtval;
-                den    +=pixval*pixval;
-            }
+        den = 1e-6;
+        num = 0;
+        for(d=0;d<depth;d++)
+        {
+            size_t istride = d*srcheight;
+            size_t dstride = d*fsz+f*fstride;
+            for(v=0;v<fsz;v++)
+                for(u=0;u<fsz;u++)
+                {
+                    pixval =tex2D(teximg,col+u,istride+row+v);
+                    filtval=tex2D(texfilt,u,v+dstride);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                }
+        }
+        *elptr(dest,f,row,col,ht,pitch)=fabs(num)/sqrtf(den);
     }
-    *elptr(dest,0,row,col,ht,pitch)=fabs(num)/sqrtf(den+1e-6);
 }
 
 /*
@@ -368,16 +381,20 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
    size_t                   pitch;
    /*channel description*/
    
+   /*determine largest filter size*/
+   int fsz             = filt[0].width;
+   int fdepth          = filt[0].depth;
    /*stage output*/
    h_outbands = new band_info[in_bands];
    for(int b=0;b<in_bands;b++)
    {
-		h_outbands[b].height = cin[b].height-filt[0].height+1;
-		h_outbands[b].width  = cin[b].width-filt[0].width+1;
+		h_outbands[b].height = cin[b].height-fsz+1;
+		h_outbands[b].width  = cin[b].width-fsz+1;
 		h_outbands[b].depth  = num_filt;
-		CUDA_SAFE_CALL(cudaMallocPitch((void**)&d_ptr,&pitch,cin[b].width*sizeof(float),num_filt*cin[b].height));
-		CUDA_SAFE_CALL(cudaMemset2D(d_ptr,0,pitch,cin[b].width*sizeof(float),cin[b].depth*cin[b].height));
-		h_outbands[b].pitch = pitch; 
+        CUDA_SAFE_CALL(cudaMallocPitch((void**)&d_ptr,&pitch,h_outbands[b].width*sizeof(float),num_filt*h_outbands[b].height));
+        assert(d_ptr!=NULL);
+		CUDA_SAFE_CALL(cudaMemset(d_ptr,0,pitch*num_filt*h_outbands[b].height));
+		h_outbands[b].pitch = pitch;
         h_outbands[b].where = ONDEVICE;
 		h_outbands[b].ptr   = d_ptr;
    }
@@ -386,95 +403,100 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
 	   
    /*copy image*/ 
    cudaChannelFormatDesc	imgdesc=cudaCreateChannelDesc<float>();
-   cudaChannelFormatDesc    filtdesc=cudaCreateChannelDesc<float>();
-   CUDA_SAFE_CALL(cudaMallocArray(&filtarray,&filtdesc,filt[0].width,filt[0].height*filt[0].depth));
-   CUDA_SAFE_CALL(cudaMallocArray(&imgarray,&imgdesc,cin[0].width,cin[0].height*cin[0].depth));
    /*fix address modes*/
     teximg.addressMode[0] = cudaAddressModeClamp;
     teximg.addressMode[1] = cudaAddressModeClamp;
     teximg.filterMode     = cudaFilterModePoint;
     teximg.normalized     = false;
-    
+    cudaChannelFormatDesc    filtdesc=cudaCreateChannelDesc<float>();
+    CUDA_SAFE_CALL(cudaMallocArray(&filtarray,&filtdesc,fsz,num_filt*fsz*fdepth));
     texfilt.addressMode[0] = cudaAddressModeClamp;
     texfilt.addressMode[1] = cudaAddressModeClamp;
     texfilt.filterMode     = cudaFilterModePoint;
     texfilt.normalized     = false;
-
-    /*call the kernel*/
+    /*copy filters*/
+    for(int f=0;f<num_filt;f++)
+    {
+      CUDA_SAFE_CALL(cudaMemcpy2DToArray(filtarray,0,f*fsz*fdepth,
+                                         filt[f].ptr,filt[f].width*sizeof(float),
+                                         filt[f].width*sizeof(float),filt[f].height*filt[f].depth,
+                                         cudaMemcpyHostToDevice));
+    }
+	CUDA_SAFE_CALL(cudaBindTextureToArray(texfilt,filtarray));
+		
+   /*call the kernel*/
    for(int b=0;b<in_bands;b++)
    {
 	    /*copy to array*/
         copydir     = cudaMemcpyHostToDevice;
         if(cin[b].where==ONDEVICE)
             copydir = cudaMemcpyDeviceToDevice;
+        CUDA_SAFE_CALL(cudaMallocArray(&imgarray,&imgdesc,cin[b].width,cin[b].height*cin[b].depth));
+        assert(imgarray!=NULL);
 		CUDA_SAFE_CALL(cudaMemcpy2DToArray(imgarray,0,0,
 										   cin[b].ptr,cin[b].pitch,
 										   cin[b].width*sizeof(float),cin[b].height*cin[b].depth,
 									       copydir));
 	    CUDA_SAFE_CALL(cudaBindTextureToArray(teximg,imgarray));
-        for(int f=0;f<num_filt;f++)
-        {
-            CUDA_SAFE_CALL(cudaMemcpy2DToArray(filtarray,0,0,
-                                               filt[f].ptr,filt[f].width*sizeof(float),
-                                               filt[f].width*sizeof(float),filt[f].height*filt[f].depth,
-                                               cudaMemcpyHostToDevice));
-	        CUDA_SAFE_CALL(cudaBindTextureToArray(texfilt,filtarray));
-		    uint3 gridsz	 = make_uint3(ceilf((float)cin[b].width/BLOCK_SIZE),ceilf((float)cin[b].height/BLOCK_SIZE),1);
-		    uint3 blocksz	 = make_uint3(BLOCK_SIZE,BLOCK_SIZE,1);
-            float* dest      = elptr(h_outbands[b].ptr,f,0,0,h_outbands[b].height,h_outbands[b].pitch);
-		    kernel_s_norm_filter<<<gridsz,blocksz>>>(dest,h_outbands[b].pitch,cin[b].depth,cin[b].width,cin[b].height,filt[f].width,filt[f].height);
-            CUDA_SAFE_CALL(cudaThreadSynchronize());
-	        CUDA_SAFE_CALL(cudaUnbindTexture(texfilt));
-        }
+        uint3 gridsz	 = make_uint3(ceilf((float)h_outbands[b].width/BLOCK_SIZE),ceilf((float)h_outbands[b].height/BLOCK_SIZE),1);
+		uint3 blocksz	 = make_uint3(BLOCK_SIZE,BLOCK_SIZE,1);
+		kernel_s_norm_filter<<<gridsz,blocksz>>>(h_outbands[b].ptr,
+                                                 h_outbands[b].pitch,h_outbands[b].width,h_outbands[b].height,
+                                                 cin[b].width,cin[b].height,
+                                                 fdepth,fsz,num_filt);
+        CUDA_SAFE_CALL(cudaThreadSynchronize());
         CUDA_SAFE_CALL(cudaUnbindTexture(teximg));
+        CUDA_SAFE_CALL(cudaFreeArray(imgarray));
    }
+   CUDA_SAFE_CALL(cudaUnbindTexture(texfilt));
    for(int b=0;copy && b<in_bands;b++)
    {
        int    sz  = h_outbands[b].height*h_outbands[b].width*num_filt;
        float* ptr = new float[sz];
        assert(ptr!=NULL);
        CUDA_SAFE_CALL(cudaMemcpy2D(ptr,h_outbands[b].width*sizeof(float),
-                                  h_outbands[b].ptr,h_outbands[b].pitch,
-                                  h_outbands[b].width*sizeof(float),h_outbands[b].height*h_outbands[b].depth,
-                                  cudaMemcpyDeviceToHost));
+                                   h_outbands[b].ptr,h_outbands[b].pitch,
+                                   h_outbands[b].width*sizeof(float),h_outbands[b].height*h_outbands[b].depth,
+                                   cudaMemcpyDeviceToHost));
        CUDA_SAFE_CALL(cudaFree(h_outbands[b].ptr));
        h_outbands[b].ptr   =ptr;
        h_outbands[b].pitch =h_outbands[b].width*sizeof(float);
+       h_outbands[b].where =ONHOST;
    }
    CUDA_SAFE_CALL(cudaThreadSynchronize());
    /*copy image to output*/   
-   CUDA_SAFE_CALL(cudaFreeArray(imgarray));
    CUDA_SAFE_CALL(cudaFreeArray(filtarray));
 }
 
 
-__global__  void kernel_s_rbf(float* dest,float sigma,int depth,int wt,int ht,int fwt,int fht)
+__global__  void kernel_s_rbf(float* dest,int pitch,int wt,int ht,int srcwidth,int srcheight,int depth,int fsz,int num_filt,float sigma)
 {
     int         row             = blockIdx.y*BLOCK_SIZE+threadIdx.y;
     int         col             = blockIdx.x*BLOCK_SIZE+threadIdx.x;
-    int         xoff            = floorf(fwt/2);
-    int         yoff            = floorf(fht/2);
-    int         pitch           = wt*sizeof(float);
+    int         fstride         = fsz*depth;
 	int u,v,d;
     float       num             = 0;
     float       pixval          = 0;
     float       filtval         = 0;
-    if(row>ht-fht) return;
-    if(col>wt-fwt) return;
-    for(d=0;d<depth;d++)
+    if(row>=ht) return;
+    if(col>=wt) return;
+    for(int f=0;f<num_filt;f++)
     {
-        for(v=0;v<fht;v++)
-            for(u=0;u<fwt;u++)
-            {
-                pixval =tex2D(teximg,col+u,d*ht+row+v);
-                filtval=tex2D(texfilt,u,d*fht+v);
-                num    += (pixval-filtval)*(pixval-filtval);
-            }
+        num = 0;
+        for(d=0;d<depth;d++)
+        {
+            size_t istride = d*srcheight;
+            size_t dstride = d*fsz+f*fstride;
+            for(v=0;v<fsz;v++)
+                for(u=0;u<fsz;u++)
+                {
+                    pixval =tex2D(teximg,col+u,istride+row+v);
+                    filtval=tex2D(texfilt,u,v+dstride);
+                    num    +=(pixval-filtval)*(pixval-filtval);
+                }
+        }
+        *elptr(dest,f,row,col,ht,pitch)=exp(-num/sigma);
     }
-    /*
-     *printf("%d,%d:%.6f,%0.6f\n",row,col,num,expf(-num/sigma));
-     */
-    *elptr(dest,0,row+yoff,col+xoff,ht,pitch)=exp(-num/sigma);
 }
 
 /*
@@ -489,18 +511,22 @@ void gpu_s_rbf(band_info* cin,int in_bands,band_info* filt,int num_filt, float s
    band_info*				h_outbands;
    float*					d_ptr;
    cudaMemcpyKind           copydir=cudaMemcpyHostToDevice;
-   /*channel description*/
-   
+   size_t                   pitch;
+   /*determine largest filter size*/
+   int fsz             = filt[0].width;
+   int fdepth          = filt[0].depth;
+ 
    /*stage output*/
    h_outbands = new band_info[in_bands];
    for(int b=0;b<in_bands;b++)
    {
-		h_outbands[b].height = cin[b].height;
-		h_outbands[b].width  = cin[b].width;
+		h_outbands[b].height = cin[b].height-fsz+1;
+		h_outbands[b].width  = cin[b].width-fsz+1;
 		h_outbands[b].depth  = num_filt;
-		CUDA_SAFE_CALL(cudaMalloc((void**)&d_ptr,cin[b].width*sizeof(float)*num_filt*cin[b].height));
-		CUDA_SAFE_CALL(cudaMemset(d_ptr,0,cin[b].width*sizeof(float)*num_filt*cin[b].height));
-		h_outbands[b].pitch = cin[b].width*sizeof(float);
+		CUDA_SAFE_CALL(cudaMallocPitch((void**)&d_ptr,&pitch,h_outbands[b].width*sizeof(float),num_filt*h_outbands[b].height));
+        assert(d_ptr!=NULL);
+		CUDA_SAFE_CALL(cudaMemset(d_ptr,0,pitch*num_filt*h_outbands[b].height));
+		h_outbands[b].pitch = pitch; 
 		h_outbands[b].ptr   = d_ptr;
         h_outbands[b].where = ONDEVICE;
    }
@@ -509,56 +535,62 @@ void gpu_s_rbf(band_info* cin,int in_bands,band_info* filt,int num_filt, float s
 	   
    /*copy image*/ 
    cudaChannelFormatDesc	imgdesc=cudaCreateChannelDesc<float>();
-   cudaChannelFormatDesc    filtdesc=cudaCreateChannelDesc<float>();
-   CUDA_SAFE_CALL(cudaMallocArray(&filtarray,&filtdesc,filt[0].width,filt[0].height*filt[0].depth));
-   CUDA_SAFE_CALL(cudaMallocArray(&imgarray,&imgdesc,cin[0].width,cin[0].height*cin[0].depth));
    /*fix address modes*/
     teximg.addressMode[0] = cudaAddressModeClamp;
     teximg.addressMode[1] = cudaAddressModeClamp;
     teximg.filterMode     = cudaFilterModePoint;
     teximg.normalized     = false;
     
+    cudaChannelFormatDesc    filtdesc=cudaCreateChannelDesc<float>();
+    CUDA_SAFE_CALL(cudaMallocArray(&filtarray,&filtdesc,fsz,num_filt*fsz*fdepth));
     texfilt.addressMode[0] = cudaAddressModeClamp;
     texfilt.addressMode[1] = cudaAddressModeClamp;
     texfilt.filterMode     = cudaFilterModePoint;
     texfilt.normalized     = false;
-
     sigma                  = 2*sigma*sigma;
-    /*call the kernel*/
+    /*copy filters*/
+    for(int f=0;f<num_filt;f++)
+    {
+      CUDA_SAFE_CALL(cudaMemcpy2DToArray(filtarray,0,f*fsz*fdepth,
+                                         filt[f].ptr,filt[f].width*sizeof(float),
+                                         filt[f].width*sizeof(float),filt[f].height*filt[f].depth,
+                                         cudaMemcpyHostToDevice));
+    }
+	CUDA_SAFE_CALL(cudaBindTextureToArray(texfilt,filtarray));
+	/*call the kernel*/
    for(int b=0;b<in_bands;b++)
    {
         copydir = cudaMemcpyHostToDevice;
         if(cin[b].where==ONDEVICE)
             copydir=cudaMemcpyDeviceToDevice;
+        CUDA_SAFE_CALL(cudaMallocArray(&imgarray,&imgdesc,cin[b].width,cin[b].height*cin[b].depth));
+        assert(imgarray!=NULL);
 	    /*copy to array*/
 		CUDA_SAFE_CALL(cudaMemcpy2DToArray(imgarray,0,0,
 										   cin[b].ptr,cin[b].pitch,
 										   cin[b].width*sizeof(float),cin[b].height*cin[b].depth,
 									       copydir));
 	    CUDA_SAFE_CALL(cudaBindTextureToArray(teximg,imgarray));
-        for(int f=0;f<num_filt;f++)
-        {
-            //printf("Processing S2: (%d,%d)\n",b,f);
-            CUDA_SAFE_CALL(cudaMemcpy2DToArray(filtarray,0,0,
-                                               filt[f].ptr,filt[f].width*sizeof(float),
-                                               filt[f].width*sizeof(float),filt[f].height*filt[f].depth,
-                                               cudaMemcpyHostToDevice));
-	        CUDA_SAFE_CALL(cudaBindTextureToArray(texfilt,filtarray));
-		    uint3 gridsz	 = make_uint3(ceilf((float)cin[b].width/BLOCK_SIZE),ceilf((float)cin[b].height/BLOCK_SIZE),1);
-		    uint3 blocksz	 = make_uint3(BLOCK_SIZE,BLOCK_SIZE,1);
-            float* dest      = elptr(h_outbands[b].ptr,f,0,0,h_outbands[b].height,h_outbands[b].pitch);
-		    kernel_s_rbf<<<gridsz,blocksz>>>(dest,sigma,cin[b].depth,cin[b].width,cin[b].height,filt[f].width,filt[f].height);
-            CUDA_SAFE_CALL(cudaThreadSynchronize());
-	        CUDA_SAFE_CALL(cudaUnbindTexture(texfilt));
-        }
+		uint3 gridsz	 = make_uint3(ceilf((float)h_outbands[b].width/BLOCK_SIZE),ceilf((float)h_outbands[b].height/BLOCK_SIZE),1);
+		uint3 blocksz	 = make_uint3(BLOCK_SIZE,BLOCK_SIZE,1);
+		kernel_s_rbf<<<gridsz,blocksz>>>(h_outbands[b].ptr,
+                                         h_outbands[b].pitch,h_outbands[b].width,h_outbands[b].height,
+                                         cin[b].width,cin[b].height,
+                                         fdepth,fsz,num_filt,sigma);
+        CUDA_SAFE_CALL(cudaThreadSynchronize());
         CUDA_SAFE_CALL(cudaUnbindTexture(teximg));
+        CUDA_SAFE_CALL(cudaFreeArray(imgarray));
    }
+   CUDA_SAFE_CALL(cudaUnbindTexture(texfilt));
    for(int b=0;copy && b<in_bands;b++)
    {
        int    sz  = h_outbands[b].height*h_outbands[b].width*num_filt;
        float* ptr = new float[sz];
        assert(ptr!=NULL);
-       CUDA_SAFE_CALL(cudaMemcpy(ptr,h_outbands[b].ptr,sz*sizeof(float),cudaMemcpyDeviceToHost));
+       CUDA_SAFE_CALL(cudaMemcpy2D(ptr,h_outbands[b].width*sizeof(float),
+                                   h_outbands[b].ptr,h_outbands[b].pitch,
+                                   h_outbands[b].width*sizeof(float),h_outbands[b].height*h_outbands[b].depth,
+                                   cudaMemcpyDeviceToHost));
        CUDA_SAFE_CALL(cudaFree(h_outbands[b].ptr));
        h_outbands[b].ptr   =ptr;
        h_outbands[b].pitch =h_outbands[b].width*sizeof(float);
@@ -566,7 +598,6 @@ void gpu_s_rbf(band_info* cin,int in_bands,band_info* filt,int num_filt, float s
    }
    CUDA_SAFE_CALL(cudaThreadSynchronize());
    /*copy image to output*/   
-   CUDA_SAFE_CALL(cudaFreeArray(imgarray));
    CUDA_SAFE_CALL(cudaFreeArray(filtarray));
 }
 

@@ -8,6 +8,7 @@
 #define BLOCK_SIZE 16 
 using namespace std;
 
+
 float* min_element(float* start,float* end)
 {
 
@@ -343,8 +344,8 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int sr
     float       num             = 0;
     float       pixval          = 0;
     float       filtval         = 0;
-    int         nloops          = fsz/4;
-    int         residue         = fsz%4;
+    int         nloops          = fsz/7;
+    int         residue         = fsz%7;
     if(row>=ht) return;
     if(col>=wt) return;
     for(f=0;f<num_filt;f++)
@@ -389,9 +390,48 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int sr
                     num    +=filtval*pixval;
                     den    +=pixval*pixval;
                     u++;
+                    
+					//5
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+
+					//6
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+
+					//7
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
                 }
                 switch(residue)
                 {
+                    case 6:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+                    case 5:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+                    case 4:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
                     case 3:
                     pixval =tex2D(teximg,col+u,iy);
                     filtval=tex2D(texfilt,u,fy);

@@ -1,5 +1,5 @@
 CUDA  = /Developer/CUDA
-CFLAGS=  --host-compilation c++ -I $(CUDA)/common/inc \
+CFLAGS= --maxrregcount 32 --host-compilation c++ -I $(CUDA)/common/inc \
 	    -L $(CUDA)/lib
 SOURCES= main.cpp cbcl_model.cu 
 LIBS   = -lcutil

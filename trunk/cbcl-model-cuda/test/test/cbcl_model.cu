@@ -338,14 +338,16 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int sr
     int         row             = blockIdx.y*BLOCK_SIZE+threadIdx.y;
     int         col             = blockIdx.x*BLOCK_SIZE+threadIdx.x;
     int         fstride         = fsz*depth;
-	int u,v,d;
+	int u,v,d,l,f,iy,fy;
     float       den             = 0;
     float       num             = 0;
     float       pixval          = 0;
     float       filtval         = 0;
+    int         nloops          = fsz/4;
+    int         residue         = fsz%4;
     if(row>=ht) return;
     if(col>=wt) return;
-    for(int f=0;f<num_filt;f++)
+    for(f=0;f<num_filt;f++)
     {
         den = 1e-6;
         num = 0;
@@ -354,14 +356,65 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int sr
             size_t istride = d*srcheight;
             size_t dstride = d*fsz+f*fstride;
             for(v=0;v<fsz;v++)
-                for(u=0;u<fsz;u++)
+            {
+                u =0;
+                for(l=0;l<nloops;l++)
                 {
-                    pixval =tex2D(teximg,col+u,istride+row+v);
-                    filtval=tex2D(texfilt,u,v+dstride);
+                    //1
+                    iy=istride+row+v;
+                    fy=v+dstride;
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
                     num    +=filtval*pixval;
                     den    +=pixval*pixval;
+                    u++;
+
+                    //2
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+
+                    //3
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+
+                    //4
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
                 }
-        }
+                switch(residue)
+                {
+                    case 3:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+                    case 2:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+                    case 1:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=filtval*pixval;
+                    den    +=pixval*pixval;
+                    u++;
+                    case 0:
+                    break;
+                  }
+            }//v
+        }//d
         *elptr(dest,f,row,col,ht,pitch)=fabs(num)/sqrtf(den);
     }
 }
@@ -474,10 +527,12 @@ __global__  void kernel_s_rbf(float* dest,int pitch,int wt,int ht,int srcwidth,i
     int         row             = blockIdx.y*BLOCK_SIZE+threadIdx.y;
     int         col             = blockIdx.x*BLOCK_SIZE+threadIdx.x;
     int         fstride         = fsz*depth;
-	int u,v,d;
+	int u,v,d,l,iy,fy;
     float       num             = 0;
     float       pixval          = 0;
     float       filtval         = 0;
+    int         nloops          = fsz/4;
+    int         residue         = fsz%4;
     if(row>=ht) return;
     if(col>=wt) return;
     for(int f=0;f<num_filt;f++)
@@ -488,15 +543,56 @@ __global__  void kernel_s_rbf(float* dest,int pitch,int wt,int ht,int srcwidth,i
             size_t istride = d*srcheight;
             size_t dstride = d*fsz+f*fstride;
             for(v=0;v<fsz;v++)
-                for(u=0;u<fsz;u++)
+            {
+                u =0;
+                iy=istride+row+v;
+                fy=v+dstride;
+                for(l=0;l<nloops;l++)
                 {
-                    pixval =tex2D(teximg,col+u,istride+row+v);
-                    filtval=tex2D(texfilt,u,v+dstride);
-                    num    +=(pixval-filtval)*(pixval-filtval);
-                }
-        }
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=(filtval-pixval)*(filtval-pixval);
+                    u++;
+
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=(filtval-pixval)*(filtval-pixval);
+                    u++;
+
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=(filtval-pixval)*(filtval-pixval);
+                    u++;
+
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=(filtval-pixval)*(filtval-pixval);
+                    u++;
+                 }
+                 switch(residue)
+                 {
+                    case 3:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=(filtval-pixval)*(filtval-pixval);
+                    u++;
+                    case 2:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=(filtval-pixval)*(filtval-pixval);
+                    u++;
+                    case 1:
+                    pixval =tex2D(teximg,col+u,iy);
+                    filtval=tex2D(texfilt,u,fy);
+                    num    +=(filtval-pixval)*(filtval-pixval);
+                    u++;
+                    case 0:
+                    break;
+                  }
+            }//v
+        }//d
         *elptr(dest,f,row,col,ht,pitch)=exp(-num/sigma);
-    }
+    }//f
 }
 
 /*
@@ -547,6 +643,7 @@ void gpu_s_rbf(band_info* cin,int in_bands,band_info* filt,int num_filt, float s
     texfilt.addressMode[1] = cudaAddressModeClamp;
     texfilt.filterMode     = cudaFilterModePoint;
     texfilt.normalized     = false;
+
     sigma                  = 2*sigma*sigma;
     /*copy filters*/
     for(int f=0;f<num_filt;f++)

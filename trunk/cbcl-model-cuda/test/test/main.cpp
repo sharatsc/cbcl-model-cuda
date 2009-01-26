@@ -72,7 +72,6 @@ void cpu_read_filters(const char* filename,band_info** ppfilt,int* pnfilts)
 	int num_filters;
 
 	fin>>num_filters;
-	cout<<"Number of filters"<<num_filters<<endl;
 	assert(num_filters >= 1);
 	*pnfilts= num_filters;
 	*ppfilt = new band_info[num_filters];
@@ -244,18 +243,21 @@ int main(int argc,char* argv[])
 	CUT_SAFE_CALL( cutCreateTimer(&hTimer) );
     CUT_SAFE_CALL( cutResetTimer(hTimer) );
     CUT_SAFE_CALL( cutStartTimer(hTimer) );
+    for(int i=0;i<10;i++)
+    {
     cpu_create_c0(pimg,width,height,&c0,&nc0bands,1.113,12);
     gpu_s_norm_filter(c0,nc0bands,c0patches,nc0patches,&s1,&ns1bands,false);
     gpu_c_local(s1,ns1bands,8,3,2,2,&c1,&nc1bands,false);
     gpu_s_rbf(c1,nc1bands,c1patches,nc1patches,sqrtf(0.5),&s2,&ns2bands);
     cpu_c_global(s2,ns2bands,&c2b,&nc2units);
-    double gpuTime = cutGetTimerValue(hTimer);
-    printf("Time taken for S2,C2: %lf\n",gpuTime);
-    cutWriteFilef("c2.txt",c2b,nc2units,1e-6);
     cpu_release_images(&c0,nc0bands);
     cpu_release_images(&s1,ns1bands);
     cpu_release_images(&c1,nc1bands);
     cpu_release_images(&s2,ns2bands);
+    }
+    double gpuTime = cutGetTimerValue(hTimer);
+    printf("Time taken for S2,C2: %lf\n",gpuTime);
+   cutWriteFilef("c2.txt",c2b,nc2units,1e-6);
 }
 #else
 int main(int argc,char* argv[])

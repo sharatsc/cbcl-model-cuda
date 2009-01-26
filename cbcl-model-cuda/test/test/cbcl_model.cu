@@ -333,6 +333,24 @@ void cpu_create_c0(float* pimg,int width,int height,band_info** ppc,int* pbands,
 	}
 }
 
+template<int u>
+__device__ void colNorm(int irow,int frow,int col,float* pnum,float* pden)
+{
+    float pval=0;
+    float fval=0;
+    pval = tex2D(teximg,col+u-1,irow);
+    fval = tex2D(texfilt,u-1,frow);
+    *pnum += pval*fval;
+    *pden += pval*pval;
+    colNorm<u-1>(irow,frow,col,pnum,pden);
+}
+
+template<>
+__device__ void colNorm<0>(int irow,int frow,int col,float *pnum,float *pden)
+{
+    return;
+}
+
 
 __global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int srcwidth,int srcheight,int depth,int fsz,int num_filt)
 {
@@ -344,8 +362,8 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int sr
     float       num             = 0;
     float       pixval          = 0;
     float       filtval         = 0;
-    int         nloops          = fsz/7;
-    int         residue         = fsz%7;
+    int         nloops          = fsz/4;
+    int         residue         = fsz%4;
     if(row>=ht) return;
     if(col>=wt) return;
     for(f=0;f<num_filt;f++)
@@ -354,107 +372,88 @@ __global__  void kernel_s_norm_filter(float* dest,int pitch,int wt,int ht,int sr
         num = 0;
         for(d=0;d<depth;d++)
         {
-            size_t istride = d*srcheight;
-            size_t dstride = d*fsz+f*fstride;
-            for(v=0;v<fsz;v++)
+            iy = d*srcheight+row;
+            fy = d*fsz+f*fstride;
+            switch(fsz)
             {
-                u =0;
-                for(l=0;l<nloops;l++)
-                {
-                    //1
-                    iy=istride+row+v;
-                    fy=v+dstride;
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-
-                    //2
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-
-                    //3
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-
-                    //4
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                    
-					//5
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-
-					//6
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-
-					//7
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                }
-                switch(residue)
-                {
-                    case 6:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                    case 5:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                    case 4:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                    case 3:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                    case 2:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                    case 1:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=filtval*pixval;
-                    den    +=pixval*pixval;
-                    u++;
-                    case 0:
+                case 5:
+                    v = 0;
+                    colNorm<5>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<5>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<5>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<5>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<5>(iy+v,fy+v,col,&num,&den);v++;
+                 case 7:
+                    v = 0;
+                    colNorm<7>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<7>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<7>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<7>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<7>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<7>(iy+v,fy+v,col,&num,&den);v++;
+                    colNorm<7>(iy+v,fy+v,col,&num,&den);v++;
                     break;
-                  }
-            }//v
-        }//d
+                default:
+                    for(v=0;v<fsz;v++,iy++,fy++)
+                    {
+                        u =0;
+                        for(l=0;l<nloops;l++)
+                        {
+                            //1
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=filtval*pixval;
+                            den    +=pixval*pixval;
+                            u++;
+
+                            //2
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=filtval*pixval;
+                            den    +=pixval*pixval;
+                            u++;
+
+                            //3
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=filtval*pixval;
+                            den    +=pixval*pixval;
+                            u++;
+
+                            //4
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=filtval*pixval;
+                            den    +=pixval*pixval;
+                            u++;
+                        }
+                        switch(residue)
+                        {
+                            case 3:
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=filtval*pixval;
+                            den    +=pixval*pixval;
+                            u++;
+                            case 2:
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=filtval*pixval;
+                            den    +=pixval*pixval;
+                            u++;
+                            case 1:
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=filtval*pixval;
+                            den    +=pixval*pixval;
+                            u++;
+                            case 0:
+                            break;
+                        }
+                    }//v
+                    break;
+           }//switch
+       }//d
         *elptr(dest,f,row,col,ht,pitch)=fabs(num)/sqrtf(den);
     }
 }
@@ -561,6 +560,21 @@ void gpu_s_norm_filter(band_info* cin,int in_bands,band_info* filt,int num_filt,
    CUDA_SAFE_CALL(cudaFreeArray(filtarray));
 }
 
+template<int u>
+__device__ float colDist(int irow,int frow,int col)
+{
+    float pval=0;
+    float fval=0;
+    pval = tex2D(teximg,col+u-1,irow);
+    fval = tex2D(texfilt,u-1,frow);
+    return (pval-fval)*(pval-fval)+colDist<u-1>(irow,frow,col);
+}
+
+template<>
+__device__ float colDist<0>(int irow,int frow,int col)
+{
+    return 0;
+}
 
 __global__  void kernel_s_rbf(float* dest,int pitch,int wt,int ht,int srcwidth,int srcheight,int depth,int fsz,int num_filt,float sigma)
 {
@@ -580,56 +594,84 @@ __global__  void kernel_s_rbf(float* dest,int pitch,int wt,int ht,int srcwidth,i
         num = 0;
         for(d=0;d<depth;d++)
         {
-            size_t istride = d*srcheight;
-            size_t dstride = d*fsz+f*fstride;
-            for(v=0;v<fsz;v++)
+            iy = d*srcheight+row;
+            fy = d*fsz+f*fstride;
+            switch(fsz)
             {
-                u =0;
-                iy=istride+row+v;
-                fy=v+dstride;
-                for(l=0;l<nloops;l++)
-                {
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=(filtval-pixval)*(filtval-pixval);
-                    u++;
-
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=(filtval-pixval)*(filtval-pixval);
-                    u++;
-
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=(filtval-pixval)*(filtval-pixval);
-                    u++;
-
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=(filtval-pixval)*(filtval-pixval);
-                    u++;
-                 }
-                 switch(residue)
-                 {
-                    case 3:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=(filtval-pixval)*(filtval-pixval);
-                    u++;
-                    case 2:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=(filtval-pixval)*(filtval-pixval);
-                    u++;
-                    case 1:
-                    pixval =tex2D(teximg,col+u,iy);
-                    filtval=tex2D(texfilt,u,fy);
-                    num    +=(filtval-pixval)*(filtval-pixval);
-                    u++;
-                    case 0:
+                case 4:
+                    v    = 0;
+                    num += colDist<4>(iy+v,fy+v,col);v++;
+                    num += colDist<4>(iy+v,fy+v,col);v++;
+                    num += colDist<4>(iy+v,fy+v,col);v++;
+                    num += colDist<4>(iy+v,fy+v,col);v++;
                     break;
-                  }
-            }//v
+                case 6:
+                    v    = 0;
+                    num += colDist<6>(iy+v,fy+v,col);v++;
+                    num += colDist<6>(iy+v,fy+v,col);v++;
+                    num += colDist<6>(iy+v,fy+v,col);v++;
+                    num += colDist<6>(iy+v,fy+v,col);v++;
+                    num += colDist<6>(iy+v,fy+v,col);v++;
+                    num += colDist<6>(iy+v,fy+v,col);v++;
+                    break;
+                case 8:
+                    v    = 0;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                    num += colDist<8>(iy+v,fy+v,col);v++;
+                 default:
+                    for(v=0;v<fsz;v++,iy++,fy++)
+                    {
+                        for(l=0;l<nloops;l++)
+                        {
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=(filtval-pixval)*(filtval-pixval);
+                            u++;
+
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=(filtval-pixval)*(filtval-pixval);
+                            u++;
+
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=(filtval-pixval)*(filtval-pixval);
+                            u++;
+
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=(filtval-pixval)*(filtval-pixval);
+                            u++;
+                         }
+                         switch(residue)
+                         {
+                            case 3:
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=(filtval-pixval)*(filtval-pixval);
+                            u++;
+                            case 2:
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=(filtval-pixval)*(filtval-pixval);
+                            u++;
+                            case 1:
+                            pixval =tex2D(teximg,col+u,iy);
+                            filtval=tex2D(texfilt,u,fy);
+                            num    +=(filtval-pixval)*(filtval-pixval);
+                            u++;
+                            case 0:
+                            break;
+                          }
+                    }//v
+                    break;
+            }//switch
         }//d
         *elptr(dest,f,row,col,ht,pitch)=exp(-num/sigma);
     }//f

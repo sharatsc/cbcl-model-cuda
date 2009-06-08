@@ -237,7 +237,8 @@ int main(int argc,char* argv[])
     int     height;
     int     width;
 	unsigned int hTimer;
-    cpu_read_image("cameraman.pgm",&pimg,&width,&height);
+   	CUT_DEVICE_INIT(argc,argv);
+	cpu_read_image("cameraman.pgm",&pimg,&width,&height);
     cpu_read_filters("c0Patches.txt",&c0patches,&nc0patches);
     cpu_read_filters("c1Patches.txt",&c1patches,&nc1patches);
 	CUT_SAFE_CALL( cutCreateTimer(&hTimer) );

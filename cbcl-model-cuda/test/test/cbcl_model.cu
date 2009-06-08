@@ -5,7 +5,7 @@
 #include "cbcl_model.h"
 
 
-#define BLOCK_SIZE 8 
+#define BLOCK_SIZE 16 
 using namespace std;
 
 

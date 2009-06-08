@@ -16,12 +16,6 @@
 		/>
 	</Platforms>
 	<ToolFiles>
-		<ToolFile
-			RelativePath="..\..\..\..\CUDA\doc\Cuda21.rules"
-		/>
-		<ToolFile
-			RelativePath="..\..\..\..\CUDA\common\Cuda.rules"
-		/>
 	</ToolFiles>
 	<Configurations>
 		<Configuration
@@ -37,9 +31,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -77,7 +68,7 @@
 				AdditionalDependencies="cudart.lib cutil32D.lib"
 				OutputFile="template.exe"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);$(CUDA)/common/lib"
+				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);$(CUDA_LIB_PATH)/../common/lib"
 				IgnoreAllDefaultLibraries="false"
 				GenerateDebugInformation="true"
 				ProgramDatabaseFile="$(OutDir)/template.pdb"
@@ -124,9 +115,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -213,9 +201,6 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
-				Name="CUDA Build Rule"
-			/>
-			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -294,9 +279,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -380,9 +362,6 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
-				Name="CUDA Build Rule"
-			/>
-			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -464,9 +443,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -553,9 +529,6 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
-				Name="CUDA Build Rule"
-			/>
-			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -635,9 +608,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
